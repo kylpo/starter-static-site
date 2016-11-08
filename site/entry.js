@@ -1,7 +1,11 @@
+// @flow
+
 import ReactDOM from 'react-dom'
 import ReactDOMServer from 'react-dom/server'
 import useScroll from 'react-router-scroll'
 import routes from './scenes'
+import { renderStatic } from 'glamor/server'
+import { rehydrate } from 'glamor'
 
 import {
   match,
@@ -11,9 +15,22 @@ import {
   Router,
   RouterContext,
 } from 'react-router'
-import HtmlDocument from 'react-html-document'
 
-const inlineStyles = `
+// Client render (optional):
+if (typeof document !== 'undefined') {
+  rehydrate(window._glam)
+
+  ReactDOM.render(
+    <Router
+      history={browserHistory}
+      routes={routes}
+      render={applyRouterMiddleware(useScroll())}
+    />,
+    document.getElementById( 'root' )
+  )
+}
+
+const globalStyles = `
   /* box-sizing reset */
   *, *:before, *:after {
     box-sizing: inherit;
@@ -29,49 +46,38 @@ const inlineStyles = `
   }
 `
 
-class Html extends React.Component {
-  render() {
-    return (
-      <HtmlDocument
-        title='Site Title'
-        metatags={[
-          {name: 'viewport', content: 'width=device-width, initial-scale=1, maximum-scale=1'},
-          {httpEquiv: 'content-type', content: 'text/html; charset=utf-8'},
-        ]}
-        scripts={[
-          `/bundle.js?t=${new Date().getTime()}`,
-        ]}
-        stylesheets={[{inline: inlineStyles}]}
-      >
-        {this.props.children}
-      </HtmlDocument>
-    )
-  }
-}
-
-// Client render (optional):
-if (typeof document !== 'undefined') {
-  ReactDOM.render(
-    <Router
-      history={browserHistory}
-      routes={routes}
-      render={applyRouterMiddleware(useScroll())}
-    />,
-    document.getElementById( 'app' ) // 'app' is default id of Html's wrapper
-  )
-}
 
 // Exported static site renderer:
-export default (locals, callback) => {
+export default (locals: Object, callback: Function) => {
   const history = createMemoryHistory()
   const location = history.createLocation(locals.path)
 
   match({ routes, location }, (error, redirectLocation, renderProps) => {
-    callback( null, '<!DOCTYPE html>' + ReactDOMServer.renderToStaticMarkup(
-      <Html location={location}>
-        <RouterContext {...renderProps} />
-      </Html>
+    const { html, css, ids } = renderStatic(() => ReactDOMServer.renderToStaticMarkup(
+      <RouterContext {...renderProps} />
     ))
-  })
 
+    callback( null, `
+      <!DOCTYPE html>
+      <html>
+        <head>
+          <style>${globalStyles}</style>
+          <style>${css}</style>
+          <title>Site Title</title>
+          <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+          <meta http-equiv="content-type" content="text/html; charset=utf-8">
+        </head>
+        <body>
+          <div id="root">
+            ${html}
+          </div>
+
+          <script>
+            window._glam = ${JSON.stringify(ids)}
+          </script>
+          <script src="/bundle.js?t=${new Date().getTime()}"></script>
+        </body>
+      </html>
+    `
+  )})
 }
